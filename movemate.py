@@ -8,6 +8,7 @@ import threading
 import sys
 import time
 import re
+import queue
 from datetime import datetime
 import json
 from pathlib import Path
@@ -77,30 +78,12 @@ class RobocopyMover:
         self.progress_cb = progress_cb or (lambda **_: None)
         self.stop_event = stop_event or threading.Event()
 
-    def _same_drive(self):
-        try:
-            return (os.path.splitdrive(self.source)[0].upper() ==
-                    os.path.splitdrive(self.dest)[0].upper())
-        except Exception:
-            return False
-
     def move(self):
-        if self._same_drive():
-            self._move_same_drive()
-        else:
-            self._move_cross_drive()
-        return True
-
-    def _move_same_drive(self):
-        self.progress_cb(percent=0, speed="", eta="", files="")
-        shutil.move(self.source, self.dest)
-        self.progress_cb(percent=100, speed="", eta="", files="")
-
-    def _move_cross_drive(self):
+        # Selalu gunakan robocopy /MOVE agar lebih stabil dan bisa dicancel kapan saja
         cmd = [
             "robocopy",
             self.source, self.dest,
-            "/E", "/COPYALL", "/R:1", "/W:1",
+            "/MOVE", "/E", "/COPYALL", "/R:1", "/W:1",
             "/NJH", "/NJS",
         ]
 
@@ -114,36 +97,55 @@ class RobocopyMover:
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
+        q = queue.Queue()
+        def reader_thread(pipe, output_queue):
+            try:
+                for line in pipe:
+                    output_queue.put(line)
+            finally:
+                output_queue.put(None)
+
+        t = threading.Thread(target=reader_thread, args=(proc.stdout, q))
+        t.daemon = True
+        t.start()
+
         start_time = time.time()
         pct_pattern = re.compile(r"(\d+\.?\d*)\s*%")
 
-        for line in proc.stdout:
+        # Non-blocking read agar tombol Stop langsung merespons
+        while proc.poll() is None or not q.empty():
             if self.stop_event.is_set():
                 proc.terminate()
                 raise RuntimeError("Stopped by user")
 
-            line = line.strip()
-            m = pct_pattern.search(line)
-            if m:
-                pct = float(m.group(1))
-                elapsed = time.time() - start_time
-                speed_str = ""
-                eta_str = ""
-                if elapsed > 1 and pct > 0:
-                    eta_sec = (elapsed / pct) * (100 - pct)
-                    eta_str = self._fmt_time(eta_sec)
-                    pct_per_sec = pct / elapsed
-                    speed_str = f"{pct_per_sec:.1f}%/s"
-                self.progress_cb(percent=pct, speed=speed_str, eta=eta_str, files=line)
+            try:
+                line = q.get(timeout=0.1)
+                if line is None:
+                    continue
+                
+                line = line.strip()
+                m = pct_pattern.search(line)
+                if m:
+                    pct = float(m.group(1))
+                    elapsed = time.time() - start_time
+                    speed_str = ""
+                    eta_str = ""
+                    if elapsed > 1 and pct > 0:
+                        eta_sec = (elapsed / pct) * (100 - pct)
+                        eta_str = self._fmt_time(eta_sec)
+                        pct_per_sec = pct / elapsed
+                        speed_str = f"{pct_per_sec:.1f}%/s"
+                    self.progress_cb(percent=pct, speed=speed_str, eta=eta_str, files=line)
+            except queue.Empty:
+                continue
 
         proc.wait()
         rc = proc.returncode
         if rc >= 8:
             raise RuntimeError(f"robocopy failed (exit code {rc})")
 
-        self.progress_cb(percent=99, speed="", eta="Cleaning up...", files="")
-        shutil.rmtree(self.source)
         self.progress_cb(percent=100, speed="", eta="", files="")
+        return True
 
     @staticmethod
     def _fmt_time(seconds):
@@ -826,7 +828,7 @@ class FolderMoverApp:
             if move_ok and create_symlinks:
                 try:
                     result = subprocess.run(
-                        ["mklink", "/D", item["source"], item["dest"]],
+                        ["mklink", "/J", item["source"], item["dest"]],
                         shell=True, capture_output=True, text=True,
                         creationflags=subprocess.CREATE_NO_WINDOW,
                     )
@@ -867,7 +869,7 @@ class FolderMoverApp:
 
     def _stop_operation(self):
         if self.is_moving and messagebox.askyesno(
-            "Confirm Stop", "⚠️ Stop? Current item will finish copying first."
+            "Confirm Stop", "⚠️ Stop? Proses saat ini akan langsung dihentikan."
         ):
             self.stop_event.set()
             if self.is_paused:
