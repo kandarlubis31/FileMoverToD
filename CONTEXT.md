@@ -1,28 +1,48 @@
 # FileMoverToD — Project Context
 
 ## Ringkasan
-MoveMate adalah aplikasi desktop berbasis Python untuk memindahkan folder antar drive dengan aman dan otomatis membuat symbolic links (symlinks). Tool ini sangat berguna buat lu yang mau mengosongkan ruang di drive sistem (C:) tanpa merusak path instalasi aplikasi atau game.
 
-> *Context ini dibuat otomatis oleh `catalog/generate_contexts.py`. Isi ulang
-> bagian ringkasan / arsitektur secara manual jika butuh detail lebih dalam.*
+MoveMate: utilitas desktop Windows untuk memindahkan folder dari drive sistem ke drive lain, lalu
+menggantinya dengan symbolic link. Path asli tetap valid, jadi aplikasi atau game yang memakainya
+tidak sadar foldernya sudah pindah.
 
-## Tech Stack
-Python
+## Arsitektur
 
-## Struktur Utama
+Satu berkas GUI (`movemate.py`) dengan ttkbootstrap. Pemindahan diserahkan ke **Robocopy** bawaan
+Windows, bukan `shutil`, karena Robocopy punya resume, retry, dan pelaporan progres yang sudah
+teruji. Proses dijalankan sebagai subprocess dan output-nya diurai untuk mengisi bilah progres.
+
+Setelah salinan terverifikasi, folder asal dihapus dan diganti symlink
+(`mklink /D`). Operasi dicatat di `filemover_settings.json` agar bisa dibatalkan: undo menghapus
+symlink dan memindahkan isi folder kembali.
+
+Antrean memungkinkan beberapa folder dimasukkan sekaligus; masing-masing dikerjakan berurutan
+supaya beban disk tidak bertumpuk.
+
+## Struktur
+
 ```
-CONTEXT.md
-filemover_settings.json
-folder_mover_pro.spec
-icon.ico
-movemate.py
-movemate.spec
-readme.md
+movemate.py               Aplikasi lengkap: UI, antrean, Robocopy, symlink, undo, riwayat
+filemover_settings.json   Riwayat pemindahan dan preferensi
+folder_mover_pro.spec     Konfigurasi PyInstaller (nama lama, sebelum jadi MoveMate)
+readme.md                 Dokumentasi pengguna
 ```
 
-## Cara Menjalankan
-- `python movemate.py`
+## Menjalankan
 
----
+```bash
+pip install ttkbootstrap
+python movemate.py
+```
 
-*Generated: 2026-08-08 · Path: python\FileMoverToD*
+Build installer/exe:
+
+```bash
+pyinstaller folder_mover_pro.spec
+```
+
+## Catatan penting
+
+- Symlink di Windows butuh hak Administrator atau Developer Mode aktif.
+- Memindahkan folder aplikasi yang **sedang berjalan** akan gagal; tutup aplikasinya dulu.
+- Jangan jalankan undo pada folder yang sudah berubah isinya di lokasi baru.
