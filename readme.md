@@ -1,4 +1,4 @@
-# MoveMate 📦
+# MoveMate
 
 MoveMate adalah aplikasi desktop berbasis Python untuk memindahkan folder antar drive dengan aman dan otomatis membuat symbolic links (symlinks). Tool ini sangat berguna untuk mengosongkan ruang di drive sistem (C:) tanpa merusak path instalasi aplikasi atau game.
 
@@ -49,3 +49,11 @@ Jika lu perlu mengembalikan posisi folder secara manual melalui File Explorer Wi
 - `movemate.py`: Script utama aplikasi.
 - `movemate_history.json`: Menyimpan data riwayat transfer.
 - `filemover_settings.json`: Menyimpan preferensi lokasi folder dan ukuran jendela.
+
+---
+
+## English
+
+**MoveMate** is a desktop Python application that moves folders between drives with Robocopy and then creates a symbolic link at the original path, so installed applications and games keep working while the system drive is freed.
+
+It supports real-time progress, a transfer queue, restore and undo (including manual restore), and a history of every move.
